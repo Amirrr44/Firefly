@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/browsing_history_btm_sheet_container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/browsing_history_recycler_view_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/browsing_history_btn_clear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:background="@drawable/bg_clear_history_button"
+            android:gravity="center"
+            android:text="@string/browsing_history_clear_btn"
+            android:textColor="@color/colorDownloadSubText"
+            android:textSize="14sp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="18dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/browsing_history_recycler_view"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:nestedScrollingEnabled="false" />
+    </LinearLayout>
+    <RelativeLayout
+        style="@style/PanelEmptyHolderContainer">
+
+        <ImageView
+            style="@style/PanelEmptyHolderImage"
+            android:src="@drawable/history_empty"
+            tools:ignore="ContentDescription" />
+
+        <TextView
+            android:text="@string/browsing_history_empty_view_msg"
+            style="@style/PanelEmptyHolderText"/>
+    </RelativeLayout>
+</RelativeLayout>

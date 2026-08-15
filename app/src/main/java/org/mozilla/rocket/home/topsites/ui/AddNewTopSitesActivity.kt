@@ -1,0 +1,47 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+package org.mozilla.rocket.home.topsites.ui
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.view.View
+import androidx.appcompat.widget.Toolbar
+import org.mozilla.focus.R
+import org.mozilla.focus.activity.BaseActivity
+
+class AddNewTopSitesActivity : BaseActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_settings)
+
+        val toolbar = findViewById<View>(R.id.toolbar) as Toolbar
+        setSupportActionBar(toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        toolbar.setNavigationOnClickListener { finish() }
+
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.container, AddNewTopSitesFragment())
+            .commit()
+
+        // Ensure all locale specific Strings are initialised on first run, we don't set the title
+        // anywhere before now (the title can only be set via AndroidManifest, and ensuring
+        // that that loads the correct locale string is tricky).
+        applyLocale()
+    }
+
+    override fun applyLocale() {
+        setTitle(R.string.label_menu_add_top_sites)
+    }
+
+    companion object {
+        const val REQUEST_CODE_ADD_NEW_TOP_SITES = 2000
+        const val RESULT_CODE_ADD_NEW_TOP_SITES = 100
+        const val ADD_NEW_TOP_SITES_EXTRA = "ADD_NEW_TOP_SITES_RESULT_EXTRA"
+
+        fun getStartIntent(context: Context): Intent {
+            return Intent(context, AddNewTopSitesActivity::class.java)
+        }
+    }
+}

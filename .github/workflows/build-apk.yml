@@ -1,0 +1,108 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g
+
+jobs:
+  build:
+    name: Build FirefoxLite APKs
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 for Android SDK tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          sdkmanager             "platform-tools"             "platforms;android-28"             "build-tools;28.0.3"
+
+      - name: Set up JDK 8 for Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: gradle
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Check build environment
+        run: |
+          java -version
+          ./gradlew --version
+
+      - name: Clean
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew clean --stacktrace --warning-mode=all 2>&1 | tee clean.log
+
+      - name: Build Debug and Release APKs
+        shell: bash
+        env:
+          USER: github-actions
+        run: |
+          set -o pipefail
+          ./gradlew             :app:assembleFocusWebkitDebug             :app:assembleFocusWebkitRelease             --stacktrace             --info             --warning-mode=all             2>&1 | tee build.log
+
+      - name: Collect APKs
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+          debug_apk="$(find app/build/outputs -type f -name "*FocusWebkit*debug*.apk" | head -n 1 || true)"
+          release_apk="$(find app/build/outputs -type f -name "*FocusWebkit*release*.apk" | head -n 1 || true)"
+
+          test -n "$debug_apk" || { echo "Debug APK not found"; find app/build/outputs -type f -name "*.apk" -print || true; exit 1; }
+          test -n "$release_apk" || { echo "Release APK not found"; find app/build/outputs -type f -name "*.apk" -print || true; exit 1; }
+
+          cp "$debug_apk" artifacts/FirefoxLite-CyberPrivacy-debug.apk
+          cp "$release_apk" artifacts/FirefoxLite-CyberPrivacy-release-unsigned.apk
+
+          ls -lh artifacts
+
+      - name: Upload APK artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FirefoxLite-CyberPrivacy-apks
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FirefoxLite-build-logs
+          path: |
+            build.log
+            clean.log
+          if-no-files-found: warn
+          retention-days: 7
