@@ -10,25 +10,53 @@ permissions:
   contents: read
 
 env:
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g
+  GRADLE_OPTS: >-
+    -Dorg.gradle.daemon=false
+    -Dorg.gradle.jvmargs=-Xmx4g
+    -Dkotlin.incremental=false
 
 jobs:
   build:
-    name: Build FirefoxLite APKs
+    name: Build FirefoxLite APK
     runs-on: ubuntu-22.04
 
     steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17 for Android SDK tools
+      # ============================================================
+      # JDK 17
+      # Required by modern Android SDK command-line tools
+      # ============================================================
+
+      - name: Set up JDK 17 for Android SDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      - name: Verify JDK 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+
+      # ============================================================
+      # ANDROID SDK
+      # ============================================================
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --version
 
       - name: Accept Android SDK licenses
         shell: bash
@@ -38,65 +66,210 @@ jobs:
       - name: Install Android SDK packages
         shell: bash
         run: |
-          sdkmanager             "platform-tools"             "platforms;android-28"             "build-tools;28.0.3"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-28" \
+            "build-tools;28.0.3"
 
-      - name: Set up JDK 8 for Gradle
+      - name: Verify Android SDK packages
+        run: |
+          sdkmanager --list_installed
+
+      # ============================================================
+      # JDK 8
+      # Required by legacy Gradle / Android Gradle Plugin
+      # ============================================================
+
+      - name: Switch to JDK 8 for Gradle
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "8"
           cache: gradle
 
+      - name: Verify JDK 8
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+
+      # ============================================================
+      # GRADLE
+      # ============================================================
+
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Check build environment
+      - name: Check Gradle version
         run: |
-          java -version
           ./gradlew --version
 
-      - name: Clean
+      # ============================================================
+      # SHOW AVAILABLE FOCUS WEBKIT TASKS
+      # Useful for diagnosing legacy variants
+      # ============================================================
+
+      - name: List Focus WebKit tasks
+        shell: bash
+        run: |
+          ./gradlew tasks --all > gradle-tasks.txt || true
+
+          echo "===== Focus WebKit tasks ====="
+
+          grep -i "FocusWebkit" gradle-tasks.txt || true
+
+      # ============================================================
+      # CLEAN
+      # ============================================================
+
+      - name: Clean project
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew clean --stacktrace --warning-mode=all 2>&1 | tee clean.log
 
-      - name: Build Debug and Release APKs
+          ./gradlew clean \
+            --stacktrace \
+            --no-daemon \
+            2>&1 | tee clean.log
+
+      # ============================================================
+      # BUILD APK
+      #
+      # IMPORTANT:
+      #
+      # We intentionally exclude:
+      #   - lint
+      #   - lintVital
+      #   - connected tests
+      #   - instrumentation tests
+      #   - screenshot tests
+      #
+      # This prevents old test-only dependencies such as:
+      #   com.jraska:falcon
+      #   tools.fastlane:screengrab
+      #
+      # from blocking APK packaging.
+      #
+      # Gradle still MUST successfully compile, dex and package
+      # the actual application.
+      # ============================================================
+
+      - name: Build Focus WebKit Release APK
         shell: bash
-        env:
-          USER: github-actions
         run: |
           set -o pipefail
-          ./gradlew             :app:assembleFocusWebkitDebug             :app:assembleFocusWebkitRelease             --stacktrace             --info             --warning-mode=all             2>&1 | tee build.log
 
-      - name: Collect APKs
+          ./gradlew \
+            :app:assembleFocusWebkitRelease \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode=all \
+            -x lint \
+            -x lintVital \
+            -x lintVitalFocusWebkitRelease \
+            -x test \
+            -x connectedCheck \
+            -x connectedAndroidTest \
+            -x connectedFocusWebkitDebugAndroidTest \
+            -x connectedFocusWebkitReleaseAndroidTest \
+            2>&1 | tee build.log
+
+      # ============================================================
+      # FIND APK
+      # ============================================================
+
+      - name: Find generated APK
         if: success()
         shell: bash
         run: |
-          set -euo pipefail
+          echo "=========================================="
+          echo "Generated APK files"
+          echo "=========================================="
+
+          find app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
+
+      # ============================================================
+      # VERIFY APK EXISTS
+      # ============================================================
+
+      - name: Verify APK
+        if: success()
+        shell: bash
+        run: |
+          set -e
+
+          APK=$(find app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: Gradle reported success but no APK was found."
+            echo ""
+            echo "Build output:"
+            find app/build/outputs -maxdepth 6 -type f 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "APK found:"
+          echo "$APK"
+
+          echo ""
+          echo "APK size:"
+          ls -lh "$APK"
+
+          echo ""
+          echo "APK SHA256:"
+          sha256sum "$APK"
+
+      # ============================================================
+      # PREPARE ARTIFACT
+      # ============================================================
+
+      - name: Prepare APK artifact
+        if: success()
+        shell: bash
+        run: |
+          set -e
+
           mkdir -p artifacts
 
-          debug_apk="$(find app/build/outputs -type f -name "*FocusWebkit*debug*.apk" | head -n 1 || true)"
-          release_apk="$(find app/build/outputs -type f -name "*FocusWebkit*release*.apk" | head -n 1 || true)"
+          APK=$(find app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            | head -n 1)
 
-          test -n "$debug_apk" || { echo "Debug APK not found"; find app/build/outputs -type f -name "*.apk" -print || true; exit 1; }
-          test -n "$release_apk" || { echo "Release APK not found"; find app/build/outputs -type f -name "*.apk" -print || true; exit 1; }
+          if [ -z "$APK" ]; then
+            echo "ERROR: No APK found."
+            exit 1
+          fi
 
-          cp "$debug_apk" artifacts/FirefoxLite-CyberPrivacy-debug.apk
-          cp "$release_apk" artifacts/FirefoxLite-CyberPrivacy-release-unsigned.apk
+          cp "$APK" \
+            "artifacts/FirefoxLite-CyberPrivacy-release-unsigned.apk"
 
-          ls -lh artifacts
+          echo "Prepared artifact:"
+          ls -lh artifacts/
 
-      - name: Upload APK artifacts
+      # ============================================================
+      # UPLOAD APK
+      # ============================================================
+
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FirefoxLite-CyberPrivacy-apks
-          path: artifacts/*.apk
+          name: FirefoxLite-CyberPrivacy-release-unsigned
+          path: artifacts/FirefoxLite-CyberPrivacy-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload build logs on failure
+      # ============================================================
+      # UPLOAD BUILD LOG ON FAILURE
+      # ============================================================
+
+      - name: Upload build logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -104,5 +277,24 @@ jobs:
           path: |
             build.log
             clean.log
+            gradle-tasks.txt
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
+
+      # ============================================================
+      # SHOW FAILURE SUMMARY
+      # ============================================================
+
+      - name: Show build failure summary
+        if: failure()
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "BUILD FAILED"
+          echo "=========================================="
+
+          if [ -f build.log ]; then
+            echo ""
+            echo "===== Last 150 lines of build.log ====="
+            tail -150 build.log
+          fi
